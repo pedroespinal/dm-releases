@@ -31,14 +31,21 @@ jobs:
           NOTES: ${{ github.event.release.body }}
         run: |
           echo "🔑 Autenticando en Firebase..."
-          TOKEN=$(curl -s -X POST \
+          AUTH_RESPONSE=$(curl -s -X POST \
             "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${FIREBASE_API_KEY}" \
             -H "Content-Type: application/json" \
-            -d "{\"email\":\"${FIREBASE_EMAIL}\",\"password\":\"${FIREBASE_PASSWORD}\",\"returnSecureToken\":true}" \
-            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('idToken',''))")
+            -d "{\"email\":\"${FIREBASE_EMAIL}\",\"password\":\"${FIREBASE_PASSWORD}\",\"returnSecureToken\":true}")
 
+          # Log error if present (without leaking the token)
+          ERROR_MSG=$(echo "$AUTH_RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('error',{}).get('message',''))" 2>/dev/null || echo "")
+          if [ -n "$ERROR_MSG" ]; then
+            echo "❌ Firebase Auth error: $ERROR_MSG"
+            exit 1
+          fi
+
+          TOKEN=$(echo "$AUTH_RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('idToken',''))" 2>/dev/null || echo "")
           if [ -z "$TOKEN" ]; then
-            echo "❌ Error: no se pudo autenticar"
+            echo "❌ Error: token vacío — respuesta inesperada de Firebase"
             exit 1
           fi
 
