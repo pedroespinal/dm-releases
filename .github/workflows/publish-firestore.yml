@@ -1,0 +1,58 @@
+name: Publicar actualización en Firestore
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extraer versión del tag
+        id: ver
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Actualizar Firestore meta/app
+        env:
+          FIREBASE_API_KEY: AIzaSyAMWdcP3nD9US6gghzF9ZDCwl7DYzwKsTo
+          FIREBASE_EMAIL: stonepiedra1976@gmail.com
+          FIREBASE_PASSWORD: ${{ secrets.FIREBASE_PASSWORD }}
+          VERSION: ${{ steps.ver.outputs.VERSION }}
+          NOTES: ${{ github.event.release.body }}
+        run: |
+          echo "🔑 Autenticando en Firebase..."
+          TOKEN=$(curl -s -X POST \
+            "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${FIREBASE_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{\"email\":\"${FIREBASE_EMAIL}\",\"password\":\"${FIREBASE_PASSWORD}\",\"returnSecureToken\":true}" \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('idToken',''))")
+
+          if [ -z "$TOKEN" ]; then
+            echo "❌ Error: no se pudo autenticar"
+            exit 1
+          fi
+
+          echo "📝 Actualizando Firestore..."
+          RELEASED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          DOWNLOAD_URL="https://github.com/pedroespinal/dm-releases/releases/download/v${VERSION}/DonorMe-v${VERSION}.apk"
+
+          RESULT=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH \
+            "https://firestore.googleapis.com/v1/projects/donorme-92c76/databases/(default)/documents/meta/app" \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"fields\": {
+                \"latest_version\": {\"stringValue\": \"${VERSION}\"},
+                \"download_url\":   {\"stringValue\": \"${DOWNLOAD_URL}\"},
+                \"release_notes\":  {\"stringValue\": \"${NOTES}\"},
+                \"released_at\":    {\"stringValue\": \"${RELEASED_AT}\"}
+              }
+            }")
+
+          if [ "$RESULT" = "200" ]; then
+            echo "✅ Firestore actualizado: latest_version = ${VERSION}"
+            echo "   URL: ${DOWNLOAD_URL}"
+          else
+            echo "❌ Error al actualizar Firestore (HTTP ${RESULT})"
+            exit 1
+          fi
